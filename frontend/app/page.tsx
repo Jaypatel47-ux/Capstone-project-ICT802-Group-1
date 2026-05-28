@@ -34,18 +34,47 @@ type Program = {
   duration: string;
 };
 
+type RecommendedUni = University & {
+  course_name: string;
+  tuition_fee: number;
+  ielts_requirement: number;
+  duration: string;
+};
+
+type Review = {
+  id: number;
+  university_name: string;
+  student_name: string;
+  review_text: string;
+};
+
 export default function Home() {
 
   const [universities, setUniversities] = useState<University[]>([]);
   const [programs, setPrograms] = useState<Program[]>([]);
   const [selected, setSelected] = useState<University[]>([]);
-  const [country, setCountry] = useState("Australia");
+  const [country, setCountry] = useState("All");
   const [ranking, setRanking] = useState("");
   const [fee, setFee] = useState("");
   const [ielts, setIelts] = useState("");
 
+  const [showForm, setShowForm] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loggedInUser, setLoggedInUser] = useState<any>(null);
+
+  const [loginData, setLoginData] = useState({ email: "", password: "" });
+  const [registerData, setRegisterData] = useState({ name: "", email: "", password: "", country: "", ielts: "", budget: "" });
+
+  const [recommendedUnis, setRecommendedUnis] = useState<RecommendedUni[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviewInput, setReviewInput] = useState({ universityName: "", reviewText: "" });
+
   // LOAD DATA
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    fetchData();
+    fetchReviews();
+  }, []);
 
   const fetchData = async () => {
 
@@ -66,37 +95,47 @@ export default function Home() {
   // Get Program
   const getProgram = (uniId: number) => { return programs.find((p) => p.university_id === uniId); };
   const applyAllFilters = async () => {
-
     try {
+      const uniParams = new URLSearchParams();
 
-      const [uniRes, progRes] =
-        await Promise.all([
+      if (country && country !== "All") {
+        uniParams.append("country", country);
+      }
 
-          fetch(
-            `${API}/filter?country=${country}&ranking=${ranking}`
-          ),
+      if (ranking) {
+        uniParams.append("ranking", ranking);
+      }
 
-          fetch(
-            `${API}/programs/filter?fee=${fee}&ielts=${ielts}`
-          ),
-        ]);
+      const progParams = new URLSearchParams();
+
+      if (fee) {
+        progParams.append("fee", fee);
+      }
+
+      if (ielts) {
+        progParams.append("ielts", ielts);
+      }
+
+      const [uniRes, progRes] = await Promise.all([
+        fetch(`${API}/filter?${uniParams.toString()}`),
+        fetch(`${API}/programs/filter?${progParams.toString()}`),
+      ]);
 
       const filteredUnis = await uniRes.json();
       const filteredPrograms = await progRes.json();
-      setPrograms(filteredPrograms);
-      const programUniIds =
-        filteredPrograms.map(
-          (p: Program) => p.university_id
-        );
 
-      const finalUnis =
-        filteredUnis.filter(
-          (u: University) =>
-            programUniIds.includes(u.id)
-        );
+      setPrograms(filteredPrograms);
+
+      const programUniIds = filteredPrograms.map(
+        (p: Program) => p.university_id
+      );
+
+      const finalUnis = filteredUnis.filter(
+        (u: University) => programUniIds.includes(u.id)
+      );
 
       setUniversities(finalUnis);
-
+      setSelected([]);
     } catch (error) {
       console.error(error);
     }
@@ -104,8 +143,7 @@ export default function Home() {
 
   // RESET
   const handleReset = () => {
-
-    setCountry("Australia");
+    setCountry("All");
     setRanking("");
     setFee("");
     setIelts("");
@@ -212,6 +250,97 @@ export default function Home() {
     ],
   };
 
+  const fetchReviews = async () => {
+    try {
+      const res = await fetch(`${API}/api/reviews`);
+      const data = await res.json();
+      setReviews(data);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API}/api/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(loginData),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setIsLoggedIn(true);
+        setLoggedInUser(data.user);
+        setShowForm(false);
+        fetchRecommendations(data.user.country, data.user.ielts, data.user.budget);
+      } else {
+        alert(data.message);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API}/api/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(registerData),
+      });
+      if (res.ok) {
+        alert("Registration successfully! Please Login");
+        setAuthMode("login");
+      } else {
+        const txt = await res.text();
+        alert(txt);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const fetchRecommendations = async (country: string, ielts: any, budget: any) => {
+    try {
+      const res = await fetch(`${API}/api/recommendations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ country, ielts: parseFloat(ielts), budget: parseInt(budget) })
+      });
+      const data = await res.json();
+      setRecommendedUnis(data);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleReviewSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewInput.universityName || !reviewInput.reviewText) return;
+    try {
+      const res = await fetch(`${API}/api/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          universityName: reviewInput.universityName,
+          userName: loggedInUser?.name || "Student",
+          reviewText: reviewInput.reviewText
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setReviews(data.reviews);
+        setReviewInput({ universityName: "", reviewText: "" });
+        alert("Review posted successfully!");
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   return (
     <div className="container">
 
@@ -219,6 +348,108 @@ export default function Home() {
       <h1>
         Comparative Analytics Dashboard
       </h1>
+
+      <div className="register-box">
+        <h2>Student Profile Insights</h2>
+        <p>Register to get personalised university recommendations.</p>
+        {!isLoggedIn ? (
+          <button onClick={() => setShowForm(!showForm)}>
+            {showForm ? "Hide Form" : "Launch Your Insight Portal"}
+          </button>
+        ) : (
+          <div className="success-message">
+            Welcome <strong>{loggedInUser?.name}</strong>. Personalized insights unlocked below
+            <button onClick={() => { setIsLoggedIn(false); setLoggedInUser(null); setRecommendedUnis([]); }} style={{ marginLeft: '15px', background: '#ef4444', padding: '6px 12px', fontSize: '12px' }}>Logout</button>
+          </div>
+        )}
+      </div>
+
+      {showForm && !isLoggedIn && (
+        <div className="registration-section">
+          <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+            <button type="button" onClick={() => setAuthMode("login")} style={{ background: authMode === "login" ? "#2563eb" : "#94a3b8" }}>Login</button>
+            <button type="button" onClick={() => setAuthMode("register")} style={{ background: authMode === "register" ? "#2563eb" : "#94a3b8" }}>Register</button>
+          </div>
+
+          {authMode === "login" ? (
+            <form onSubmit={handleLoginSubmit} className="registration-form" style={{ gridTemplateColumns: "1fr 1fr auto" }}>
+              <input type="email" placeholder="Email" required value={loginData.email} onChange={(e) => setLoginData({ ...loginData, email: e.target.value })} />
+              <input type="password" placeholder="Password" required value={loginData.password} onChange={(e) => setLoginData({ ...loginData, password: e.target.value })} />
+              <button type="submit" style={{ background: "#16a34a" }}>Sign In</button>
+            </form>
+          ) : (
+            <form onSubmit={handleRegisterSubmit} className="registration-form">
+              <input type="text" placeholder="Name" required value={registerData.name} onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })} />
+              <input type="email" placeholder="Email" required value={registerData.email} onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })} />
+              <input type="password" placeholder="Password" required value={registerData.password} onChange={(e) => setRegisterData({ ...registerData, password: e.target.value })} />
+              <select
+                value={registerData.country}
+                onChange={(e) =>
+                  setRegisterData({ ...registerData, country: e.target.value })
+                }
+                required
+              >
+                <option value="">Select Country</option>
+                <option value="Australia">Australia</option>
+                <option value="Canada">Canada</option>
+                <option value="USA">USA</option>
+                <option value="UK">UK</option>
+              </select>
+              <input type="number" step="0.1" placeholder="IELTS Score" required value={registerData.ielts} onChange={(e) => setRegisterData({ ...registerData, ielts: e.target.value })} />
+              <input type="number" placeholder="Budget ($)" required value={registerData.budget} onChange={(e) => setRegisterData({ ...registerData, budget: e.target.value })} />
+              <button type="submit" style={{ background: "#2563eb" }}>Submit & Register</button>
+            </form>
+          )}
+        </div>
+      )}
+
+      {isLoggedIn && (
+        <div className="insights-section" style={{ marginTop: "30px" }}>
+          <h2>Personalized Recommended Universities</h2>
+          {recommendedUnis.length > 0 ? (
+            <div className="card-grid" style={{ marginBottom: "30px" }}>
+              {recommendedUnis.map((u) => (
+                <div key={u.id} className="card insight-card">
+                  <h2>{u.name}</h2>
+                  <div className="info"><span>Course</span><p>{u.course_name}</p></div>
+                  <div className="info"><span>Tuition Fee</span><p>${u.tuition_fee}</p></div>
+                  <div className="info"><span>IELTS Match</span><p>{u.ielts_requirement} (Required)</p></div>
+                  <div className="info"><span>Location</span><p>{u.location}, {u.country}</p></div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="no-results" style={{ background: "#fff", borderRadius: "18px", marginBottom: "20px" }}>No universities match your custom profile parameters.</div>
+          )}
+
+          <div className="registration-section">
+            <h2>Enter Review for Recommended University</h2>
+            <form onSubmit={handleReviewSubmit} className="registration-form" style={{ gridTemplateColumns: "1fr 2fr auto" }}>
+              <select value={reviewInput.universityName} onChange={(e) => setReviewInput({ ...reviewInput, universityName: e.target.value })} required>
+                <option value="">Choose University</option>
+                {recommendedUnis.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
+              </select>
+              <input type="text" placeholder="Write your review here..." required value={reviewInput.reviewText} onChange={(e) => setReviewInput({ ...reviewInput, reviewText: e.target.value })} />
+              <button type="submit" style={{ background: "#7c3aed" }}>Post Review</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {reviews.length > 0 && (
+        <div className="insights-section" style={{ marginTop: "30px" }}>
+          <h2> Student Reviews</h2>
+          <div className="card-grid">
+            {reviews.map((r) => (
+              <div key={r.id} className="card" style={{ borderLeft: "6px solid #7c3aed", background: "#ffffff" }}>
+                <h3 style={{ color: "#2563eb", fontSize: "18px" }}>{r.university_name}</h3>
+                <p style={{ margin: "10px 0", color: "#4b5563", fontStyle: "italic" }}>"{r.review_text}"</p>
+                <span style={{ fontSize: "12px", fontWeight: "bold", color: "#111827" }}>— By {r.student_name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* STATS */}
       <div className="stats-grid">
@@ -251,25 +482,13 @@ export default function Home() {
 
         <select
           value={country}
-          onChange={(e) =>
-            setCountry(e.target.value)
-          }
+          onChange={(e) => setCountry(e.target.value)}
         >
-          <option value="Australia">
-            Australia
-          </option>
-
-          <option value="Canada">
-            Canada
-          </option>
-
-          <option value="USA">
-            USA
-          </option>
-
-          <option value="UK">
-            UK
-          </option>
+          <option value="All">All</option>
+          <option value="Australia">Australia</option>
+          <option value="Canada">Canada</option>
+          <option value="USA">USA</option>
+          <option value="UK">UK</option>
         </select>
 
         <input
